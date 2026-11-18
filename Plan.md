@@ -15,10 +15,19 @@ Workspace-level tasks: `../Plan.md`.
       field before changing.
 
 ## Restructuring (gated on workspace step 3)
+- [ ] `bin/causalflow/validate_flow.ipynb`: `_validate` now needs `outcome_range` and
+      returns `(alpha, ecp)` correctly (workspace Plan §3a); update the calls. Its old
+      plots were reflected about the diagonal (swapped TARP outputs).
 - [ ] CRS-specific subdirectory: choose its location (package submodule vs. project
       folder with notebooks), give it its own CLAUDE.md / Plan.md.
 - [ ] `flood_loss` / `flood_saving`: stop reloading flows on every call; take model
       paths as arguments.
+- [ ] **Treatment definition** (decision for the user): Cano "score ≠ 11" vs floody
+      `CRS_TREAT` (differ on 2,083 rows, score in [10, 11), i.e. CRS class 10 / averaged).
+      Rule behind `CRS_TREAT` unknown (upstream CSV) and not a threshold on the score
+      (notebook 02 §6). Possibly ask Hahn / Cano how `crs_treat` was built.
+- [ ] **Flood-risk covariate**: Cano `avg_risk_score_all` vs floody `flood_risk100`
+      (static FSF 2022 per zipcode) — choose and document.
 - [ ] Reconcile `outcome_range` (`[-1, 6]` vs `[0, 6]` in log10 claims).
 - [ ] Modelling question (not a bug): training uses the rainfall of the month of loss,
       while forecasts use the max monthly precipitation of the year. Discuss.
