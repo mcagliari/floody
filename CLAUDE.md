@@ -33,7 +33,8 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   values = averaged); `CRS_TREAT` = that CSV's `crs_treat`, rule unknown. It differs from
   Cano's "treated = score ≠ 11" on 2,083 rows (all with score in [10, 11)). Not a
   threshold on the score: score < 10 → always treated, = 11 → always control, but [10, 11)
-  is mixed (exactly 10: 1,727 control / 183 treated). `latitude`/`longitude` have NaNs.
+  is mixed (exactly 10: 1,727 control / 183 treated). `latitude`/`longitude` have NaNs; if coordinates are needed later and no other
+  file has them, derive them from `ZIPCODE` (e.g. ZCTA centroids).
   `flood_risk100` = First Street 2022 `risk100` per zipcode (one static value per zipcode),
   whereas Cano uses `avg_risk_score_all` (= `flood_risk_avg_score`).
 - Processed files (`floody.fema.compiled.hdf5`, `floody.prism.precip.hdf5`,
