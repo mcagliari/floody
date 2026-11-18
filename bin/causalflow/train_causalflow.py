@@ -36,7 +36,7 @@ def FlowObjective(trial):
             batch_norm=True)
 
 
-    flow, best_valid_log_prob = Cflow._train_flow(XY[:,0], XY[:,1:],
+    flow, best_valid_loss = Cflow._train_flow(XY[:,0], XY[:,1:],
            outcome_range=[[-1.], [6.]],
            training_batch_size=50,
            learning_rate=lr,
@@ -48,7 +48,7 @@ def FlowObjective(trial):
         print('saving %s' % fflow) 
     torch.save(flow, fflow)
 
-    return -1*best_valid_log_prob
+    return best_valid_loss
 
 
 def SupportObjective(trial):
