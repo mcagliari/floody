@@ -10,11 +10,10 @@ Workspace-level tasks: `../Plan.md`.
 ## Known bugs (found by reading the code; not yet reproduced)
 - [ ] `flood_saving` loads `support.control` for **both** `support_control` and
       `support_treated` (`src/floody/floody.py`) → treated support is never checked.
-- [ ] Impact of the `forecast_latlon` fix (swapped bilinear weights, fixed and verified
-      2026-11-19, `docs/lessons.md`): existing city results `floody.<city>.v0*.hdf5` used
-      the old weights. Measure the change in forecast precipitation at city zipcodes
-      (criterion first); zipcode points available in `floody.prism.precip.hdf5` (labels
-      swapped), ZCTA internal points (used by `run_floody`) still missing.
+- [ ] Rerun city predictions with the fixed interpolation — gated on trained flows (Hahn's
+      are not available locally and are old-sbi pickles; retraining gated on workspace
+      §3b/§4). Priority: the `v0_worst` ("max") results, whose inputs moved materially
+      (notebook 03 §2c); `v0` ("average") inputs barely moved.
 - [ ] `CityZipcodes()` lists contain duplicates (Cape Coral: 35 entries, 28 unique =
       rows of `floody.capecoral.v0.hdf5`): find where they are dropped; check other lists.
 
@@ -45,3 +44,39 @@ Workspace-level tasks: `../Plan.md`.
 - [ ] Reconcile `outcome_range` (`[-1, 6]` vs `[0, 6]` in log10 claims).
 - [ ] Modelling question (not a bug): training uses the rainfall of the month of loss,
       while forecasts use the max monthly precipitation of the year. Discuss.
+- [ ] Modelling question: **how the forecast precipitation covariate is built**
+      (`get_X`, `data.py:219-247`; notebook 03 §2c–2d, 2026-11-19). Points to decide:
+      - "average": delta change (additive), baseline = single year 2022 on both sides
+        (PRISM observed vs CMIP6 2022, which is not synchronised with real weather), target =
+        single year 2052 per model → weather noise in both ends. Options: multi-year
+        windows (PRISM has yearly columns from 1990; CMIP6 file has 2022–2052),
+        multiplicative (ratio) change instead of additive.
+      - "max": raw CMIP6 level (no PRISM anchoring) → different spatial scale from the
+        PRISM training covariate; max taken after interpolation dilutes extremes when nodes
+        peak in different model-months (NYC: all zipcodes below the lowest node max).
+        Option: anchor like "average" (PRISM 2022 max + CMIP6 worst − CMIP6 2022 max), or
+        quantile-based correction.
+      - Position effect: cities near an interpolation-cell centre (Chicago) get ≈ the
+        4-node mean; 1.5° grid cannot resolve intra-city structure (any method).
+      - **Direction agreed 2026-11-19:** multiplicative (ratio) change for both scenarios,
+        worst case scaled too: per model, PRISM statistic × (model future / model
+        baseline), then ensemble median + spread. Same window length and statistic on
+        observed and model sides (a max grows with sample size; no pooling over models).
+        To decide at rebuild: window lengths, "average" statistic, "worst" definition
+        (window max vs percentile/return level). Additive vs multiplicative differ by
+        (O − M₀)(M₁/M₀ − 1). Measured (notebook 03 §2e): negligible for "average";
+        large for "max" in LA/NYC, where 5-yr pooled maxima are noisy (NYC future max <
+        baseline max) → use longer windows and/or per-model percentiles for "worst".
+      - Feasible with the current file: ratio change for both scenarios (PRISM-anchored),
+        multi-year windows (model baseline can only start 2022 — no historical runs),
+        per-model worst case + ensemble median/spread. Not feasible: true bias correction.
+      - Alternative inputs (checked 2026-11-19): NEX-GDDP-CMIP6 v2 (NASA; 0.25°, daily
+        1950–2100 incl. historical, 35 models, 4 SSPs, BCSD vs GMFD, CC0, public S3
+        `nex-gddp-cmip6` + THREDDS box subsetting) and CMIP6-LOCA2 (1/16°, CONUS, 27 models,
+        SSP2-4.5/3-7.0/5-8.5, Livneh-based; per USGS NCCV doc — loca.ucsd.edu unreachable,
+        TLS). Use as ratio applied to PRISM (training basis), not absolute (inference).
+      - Ask Hahn: which SSP/ensemble the local CMIP6 file holds (not in the repo), and for
+        the source `cmip6_data.npy` (models × months × lat × lon, indexed from 1850 in
+        `bin/data/forecast_precip.ipynb` → likely historical + scenario) with its model
+        list. Would give a historical baseline for the same 36 models, still 1.5°.
+        Rebuild note: `× 30·86400` assumes 30-day months (±3% error).

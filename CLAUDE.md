@@ -21,8 +21,15 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
 ## Data
 - **Local copy (2026-11-18): workspace `data/floody/`** (git-ignored, outside the repos):
   all processed `floody.*.hdf5` files, `ACS2016_20new.csv`, per-city result files
-  `floody.<city>.v0[_worst].hdf5`. Missing: `tl_2022_us_zcta520/` shapefiles and the
-  trained flows/supports. `floody.fema.compiled.hdf5` has 74,288 rows (same count as the
+  `floody.<city>.v0[_worst].hdf5`. Missing: the trained flows/supports.
+  **`tl_2022_us_zcta520/`** (downloaded by the user 2026-11-19, unzipped to
+  `data/floody/tl_2022_us_zcta520/`): Census TIGER/Line 2022 shapefile of 2020-census ZIP
+  Code Tabulation Areas, `https://www2.census.gov/geo/tiger/TIGER2022/ZCTA520/tl_2022_us_zcta520.zip`
+  (URL as proposed in session; file metadata dated 2022-09-29). 33,791 ZCTAs (= the PRISM
+  zipcode-point count), EPSG:4269 (NAD83 lon/lat), polygons + `ZCTA5CE20` (string, leading
+  zeros), `ALAND20`/`AWATER20` (m²), `INTPTLAT20`/`INTPTLON20` (internal point, strings).
+  Used by `read_zipshape` → `run_floody` interpolates the CMIP6 forecast at the internal
+  points. ZCTA ≠ USPS ZIP (block-based approximation; PO-box/single-entity ZIPs have none). `floody.fema.compiled.hdf5` has 74,288 rows (same count as the
   Cano file) with `ZIPCODE`, `YEAROFLOSS`, `MONTHOFLOSS`, lat/lon, `CRS_TREAT`,
   `CRS_SCORE`; no community column.
 - Checked 2026-11-18 (workspace `notebooks/02_cano_data.ipynb` §5–6): `fema.compiled` is the
@@ -81,7 +88,22 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   (every year 2022–2052) × 36 CMIP6 models, mm/month (×30·86400); the committed
   `forecast_precip.ipynb` writes only 2022/2030/2035/2040/2052 → local file made by a
   different version. City result files `floody.<city>.v0[_worst].hdf5`: per-zipcode
-  forecast inputs (2022, 2052) + `flood_loss`/`crs_saving` (± sig), no zipcode column.
+  forecast inputs (2022, 2052) + `flood_loss`/`crs_saving` (± sig), no zipcode column;
+  rows = `read_zipshape(CityZipcodes(city))` order (static covariates match 100%).
+  **Interpolation-bug impact (notebook 03 §2c, 2026-11-19, pre-registered, "supported"):**
+  the old method at ZCTA internal points reproduces every stored `precip.2052` (< 1e-4);
+  fixed − old, median |Δ|/σ_models (spread of the 36 CMIP6 models): "average" (`v0`)
+  0.02–0.10 in all 7 cities → negligible; "max" (`v0_worst`) 0.77–0.99 → material in
+  Houston, Cape Coral, LA (+127 mm/month median), NYC; Chicago 0.04 (§2d, descriptive, no
+  stored file: Miami 0.52, New Orleans 0.43; raw CMIP6 node maps in §2d). So `v0_worst`
+  losses/savings rest on wrong inputs; `v0` inputs are fine. PRISM zipcode points ≈ ZCTA
+  internal points (median offset ~0.001°, 24/611 city zipcodes > 0.01°; all of those
+  still reproduce, so the offset is PRISM's, not Hahn's points).
+  Additive vs multiplicative change (notebook 03 §2e, descriptive): "average" (get_X
+  structure) differs by ≤ 0.21 σ_models median (≤ 6% relative) in all cities; "max" with
+  equal 5-yr windows (PRISM 2018–22; models 2022–26 → 2048–52) mostly small but LA −17%
+  and NYC +66% (additive 105 vs multiplicative 176 mm/month, because the models' baseline
+  max 484 > future max 341): 5-yr pooled maxima are noisy (future max below baseline max).
   `flood_risk100` = First Street 2022 `risk100` per zipcode (one static value per zipcode),
   whereas Cano uses `avg_risk_score_all` (= `flood_risk_avg_score`).
 - Processed files (`floody.fema.compiled.hdf5`, `floody.prism.precip.hdf5`,
