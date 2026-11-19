@@ -28,13 +28,60 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
 - Checked 2026-11-18 (workspace `notebooks/02_cano_data.ipynb` §5–6): `fema.compiled` is the
   Cano & Hahn file **row for row, same order** (outcome + 7 covariates agree 100%), plus
   identifiers. Built by `bin/data/fema_compiled.ipynb` from Hahn's
-  `zipcode.fema.fsf.acs.rainfall.csv` (not available): `CRS_SCORE` = Cano's
+  `zipcode.fema.fsf.acs.rainfall.csv` (received 2026-11-19 with a `.v2` variant, both in
+  `data/floody/`; v2 has 4 extra white-fraction columns; compared in workspace notebook 04): `CRS_SCORE` = Cano's
   `communityRatingSystemDiscount` (looks like the CRS class, 11 = not in CRS, non-integer
-  values = averaged); `CRS_TREAT` = that CSV's `crs_treat`, rule unknown. It differs from
-  Cano's "treated = score ≠ 11" on 2,083 rows (all with score in [10, 11)). Not a
-  threshold on the score: score < 10 → always treated, = 11 → always control, but [10, 11)
-  is mixed (exactly 10: 1,727 control / 183 treated). `latitude`/`longitude` have NaNs; if coordinates are needed later and no other
+  values = averaged); `CRS_TREAT` = that CSV's `crs_treat` cast to bool. It differs from
+  Cano's "treated = score ≠ 11" on 2,083 rows (all with score in [10, 11)).
+  **`crs_treat` rule (notebook 04 §4, pre-registered, supported):** mean over the row's
+  claims of "CRS class ≤ 9" (a real discount; class 10 = in CRS, no discount); 4,052 rows
+  (5.5%) are fractional = mixed rows. So floody `CRS_TREAT` = "≥ 1 claim with a discount",
+  Cano = "≥ 1 claim in a CRS community" (class 10 included).
+  Upstream CSVs (notebook 04 §1–2): v2 = v1 + 4 white-fraction columns, otherwise
+  identical; **v2 is the source of `fema.compiled`** (all 15 columns 100%, same order). `latitude`/`longitude` have NaNs; if coordinates are needed later and no other
   file has them, derive them from `ZIPCODE` (e.g. ZCTA centroids).
+  Structure (2026-11-19, notebook 02 §7): one row = one (zipcode, year, month), no
+  duplicates; 14,729 zipcodes, 2004–2020; rows per zipcode median 3, max 69 (only months
+  with claims appear — inference). Flood-risk + census covariates are **static per
+  zipcode** (the §4 value-proxy coincides exactly with `ZIPCODE`): within a zipcode only
+  rainfall, outcome and treatment vary. Years are fairly even (largest 2011, 9.2% of rows).
+  ~1,500 zipcodes switch arm over time (both treatment definitions).
+  **What a row is** (from the upstream CSV header + 3 sample rows printed in
+  `bin/data/fema_compiled.ipynb`): an aggregate of NFIP claim records (OpenFEMA field
+  names) per (zipcode, year, month); `amountPaidOnTotalClaim_per_policy` =
+  `amountPaidOnTotalClaim` / `policyCount` (checked on the 3 rows) = payout per claimed
+  policy, i.e. loss severity *given* a claim, not per policy in force. `primaryResidence`
+  (0.667) and the CRS column look averaged over the claims → non-integer CRS values
+  (7.5% of rows) = claims from communities of different class mixed in one row
+  (inference). The aggregation code is not in the repos.
+  Far rows (notebook 02 §9, 2026-11-19): 248 rows (0.33%) lie > 100 km from their zipcode
+  (PRISM zipcode points; median row distance 4.9 km). Types seen: leading-zero zipcode
+  loss (NE properties under TX/OK/NE zipcodes, e.g. 77581 ↔ 07758; post-hoc 13/18),
+  NJ zipcodes with Jersey-Shore locations in Sandy (mailing address? guess), and bad
+  coordinates with a plausible zipcode (75638 → South China Sea). Handling: user decision.
+  Notebook 04 §3: for informative one-location far rows, `state` follows the location in
+  13/32 (all NE storm-month cases incl. the leading-zero ones → zipcode wrong) and the
+  zipcode in 18/32 (coordinates wrong, or `state` derived from the zipcode — undecidable);
+  verdict "mixed". Size-aware rule (§9 step 3): distance > 3 r + 8 km (r from ACS land
+  area, sq mi → km²) flags 672 rows (0.90%), incl. all 248 > 100 km; new ones cluster in
+  storm months (Sandy, Ivan, Katrina, Irene/Lee). Decision: flag + exclude by default.
+  lat/lon in `fema.compiled` are per row (rounded to 0.1°, differ between rows of one
+  zipcode), from the claims; 25 rows NaN.
+  Other inputs (structure looked at 2026-11-19, contents not checked):
+  `floody.acs_census.hdf5` = 32,713 zipcodes × (income, population, renter, educated,
+  white) from `ACS2016_20new.csv` (ACS 5-year 2016–2020 export, built by
+  `bin/data/census.ipynb`). Checked (notebook 03 §1): the training census covariates are
+  **identical** to it on all 14,729 training zipcodes (none missing), despite the upstream
+  CSV labelling them `2018.*`. `get_X` uses the same values for every forecast year
+  (census held fixed to 2052 — modelling choice, not a bug).
+  `floody.prism.precip.hdf5`: `ZIPCODE` + one point per zipcode (33,791, all FEMA zipcodes;
+  likely 2020-ZCTA centroids) — **labels swapped: `lat` holds longitudes, `long` latitudes**
+  (unused by code); plus yearly precipitation columns.
+  `floody.cmip6.precip_forecast.hdf5` = 28,800 lat/lon grid points × `precip.<year>.<month>`
+  (every year 2022–2052) × 36 CMIP6 models, mm/month (×30·86400); the committed
+  `forecast_precip.ipynb` writes only 2022/2030/2035/2040/2052 → local file made by a
+  different version. City result files `floody.<city>.v0[_worst].hdf5`: per-zipcode
+  forecast inputs (2022, 2052) + `flood_loss`/`crs_saving` (± sig), no zipcode column.
   `flood_risk100` = First Street 2022 `risk100` per zipcode (one static value per zipcode),
   whereas Cano uses `avg_risk_score_all` (= `flood_risk_avg_score`).
 - Processed files (`floody.fema.compiled.hdf5`, `floody.prism.precip.hdf5`,
