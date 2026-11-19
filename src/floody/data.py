@@ -108,7 +108,7 @@ class Forecast(ZipData):
 
     def forecast_latlon(self, lat, lon, year, month): 
         ''' Given latitude and longitude, interpolate precipitation forecast
-        using triangle-space cloud method for given year and month. 
+        bilinearly from the 4 surrounding grid points for given year and month.
 
         args:
             lat: float, latitude 
@@ -125,13 +125,14 @@ class Forecast(ZipData):
         # specified precipitation 
         precip = self._data['precip.%i.%i' % (year, month)] 
 
-        # preciptation predicted by the models interpolated using TSC
+        # precipitation predicted by the models, bilinear (cloud-in-cell) interpolation:
+        # each corner is weighted by the area of the sub-rectangle opposite to it
         predict = 1./(self.dlat * self.dlon) * (
-                (precip[240*i_lat + i_lon] * (self.lat_grid[i_lat] - lat) * (self.lon_grid[i_lon] - lon)) + 
-                (precip[240*i_lat + i_lon - 1] * (self.lat_grid[i_lat] - lat) * (lon - self.lon_grid[i_lon-1])) + 
-                (precip[240*(i_lat-1) + i_lon] * (lat - self.lat_grid[i_lat-1]) * (self.lon_grid[i_lon] - lon)) + 
-                (precip[240*(i_lat-1) + i_lon - 1] * (lat - self.lat_grid[i_lat-1]) * (lon - self.lon_grid[i_lon-1]))
-                ) 
+                (precip[240*i_lat + i_lon] * (lat - self.lat_grid[i_lat-1]) * (lon - self.lon_grid[i_lon-1])) +
+                (precip[240*i_lat + i_lon - 1] * (lat - self.lat_grid[i_lat-1]) * (self.lon_grid[i_lon] - lon)) +
+                (precip[240*(i_lat-1) + i_lon] * (self.lat_grid[i_lat] - lat) * (lon - self.lon_grid[i_lon-1])) +
+                (precip[240*(i_lat-1) + i_lon - 1] * (self.lat_grid[i_lat] - lat) * (self.lon_grid[i_lon] - lon))
+                )
         return predict 
 
 
