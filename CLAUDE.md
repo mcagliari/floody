@@ -96,6 +96,11 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   load (2026-11-20): `Precip` renames them to `latitude`/`longitude` by value (|value| > 90 =
   longitude; raises if undecidable), so a corrected file also works. Plus yearly
   precipitation columns.
+  **Decided 2026-11-20 (user with Hahn): forecast precipitation will come from
+  NEX-GDDP-CMIP6** (documented models/scenarios/members, historical runs); the current
+  CMIP6 file below is kept only as the record of Hahn's results. Hahn shared the GitHub
+  repo of the notebooks that built the processed files (to clone) and is looking for the
+  original FEMA data (if found: rebuild the processed dataset from the raw claims).
   `floody.cmip6.precip_forecast.hdf5` = 28,800 lat/lon grid points × `precip.<year>.<month>`
   (every year 2022–2052) × 36 CMIP6 models, mm/month (×30·86400); 1.5° common grid, so
   regridded by whoever built `cmip6_data.npy` (CMIP6 output is on each model's own grid,
