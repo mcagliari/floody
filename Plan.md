@@ -2,10 +2,34 @@
 
 Workspace-level tasks: `../Plan.md`.
 
+## Questions for Hahn (collected 2026-11-20; send, then fold answers into CLAUDE.md)
+1. CMIP6 file: which scenario(s) (SSP), which member (`variant_label`) per model, the list
+   of the 36 models, and how/by whom it was regridded to 1.5°. Source `cmip6_data.npy`
+   (+ lat/lon) and the original CMIP6 files/attributes if still available (would give a
+   historical baseline for the same models). Which version of `forecast_precip.ipynb` made
+   the local file (it has every year 2022–2052; the committed one writes 5 years).
+2. FSF `Flood Risk Data.csv`: source URL and release; are "current / in 30 years" 2020/2050
+   or 2022/2052; why `avg_risk.2022` ≠ Cano's `avg_risk_score_all` (89.6% of zipcodes);
+   do zeros in the 1–10 score mean missing.
+3. `zipcode.fema.fsf.acs.rainfall[.v2].csv`: the aggregation code (NFIP claims → zipcode ×
+   month rows), where the per-row lat/lon come from, and whether `crs_treat` = share of
+   claims with class ≤ 9 (our reconstruction, notebook 04 §4).
+4. `prism_zipcode_20240911.csv`: source/tool, and confirm `lat`/`long` are swapped; are the
+   points centroids or ZCTA internal points.
+5. `outcome_range`: `[-1, 6]` (scripts) or `[0, 6]` (`causalflow.ipynb`) intended?
+6. Treatment: why `CRS_TREAT` (≥ 1 claim with a discount, class ≤ 9) rather than Cano's
+   score ≠ 11 (class 10 included)?
+7. Which sbi version trained the Della flows (does old `made` honour `num_blocks`)?
+8. Bugs found, for upstream: `flood_saving` loads `support.control` twice; bilinear
+   interpolation weights swapped in `forecast_latlon`; `_validate` unpacks tarp's
+   `(ecp, alpha)` swapped (old TARP plots reflected); `load_flow_control` bug (fixed).
+   Interest in PRs?
+
 ## Data
-- [ ] User downloads the processed (or raw) data. Decide the location (outside the
-      repos, e.g. a git-ignored data dir) and how code finds it (env var / config),
-      replacing the hard-coded paths in `data._load_data` and `floody.py`.
+- [ ] FSF `avg_risk.2022` ≠ Cano `avg_risk_score_all` (notebook 05 §4, 89.6% of training
+      zipcodes differ, mostly by < 0.1, extremes up to ±10). Find out why (rounding /
+      different FSF release / zero = missing) — matters only if the avg score is chosen as
+      the flood-risk covariate; Questions for Hahn (2).
 
 ## Known bugs (found by reading the code; not yet reproduced)
 - [ ] `flood_saving` loads `support.control` for **both** `support_control` and
@@ -18,6 +42,10 @@ Workspace-level tasks: `../Plan.md`.
       rows of `floody.capecoral.v0.hdf5`): find where they are dropped; check other lists.
 
 ## Restructuring (gated on workspace step 3)
+- [ ] Move the remaining callers of `FEMA.prepare_train_test` to `FEMA.prepare`, then
+      remove it: `bin/causalflow/{causalflow,validate_flow,validate_support}.ipynb`,
+      `doc/nb/support.ipynb` (Hahn's, Della paths). Studies are now journal files
+      (`causalflow.study`); Hahn's SQLite studies hold old-sbi pickles anyway.
 - [ ] `bin/causalflow/validate_flow.ipynb`: `_validate` now needs `outcome_range` and
       returns `(alpha, ecp)` correctly (workspace Plan §3a); update the calls. Its old
       plots were reflected about the diagonal (swapped TARP outputs).
@@ -40,7 +68,9 @@ Workspace-level tasks: `../Plan.md`.
       Same row order → same mask for the Cano dataset. Long term: rebuild rows from raw
       NFIP claims (aggregation code still to get from Hahn).
 - [ ] **Flood-risk covariate**: Cano `avg_risk_score_all` vs floody `flood_risk100`
-      (static FSF 2022 per zipcode) — choose and document.
+      (static FSF 2022 per zipcode) — choose and document. `risk100` labels checked
+      (notebook 05: nesting and future > current hold); the avg score differs from Cano's
+      (see Data).
 - [ ] Reconcile `outcome_range` (`[-1, 6]` vs `[0, 6]` in log10 claims).
 - [ ] Modelling question (not a bug): training uses the rainfall of the month of loss,
       while forecasts use the max monthly precipitation of the year. Discuss.
@@ -75,8 +105,6 @@ Workspace-level tasks: `../Plan.md`.
         `nex-gddp-cmip6` + THREDDS box subsetting) and CMIP6-LOCA2 (1/16°, CONUS, 27 models,
         SSP2-4.5/3-7.0/5-8.5, Livneh-based; per USGS NCCV doc — loca.ucsd.edu unreachable,
         TLS). Use as ratio applied to PRISM (training basis), not absolute (inference).
-      - Ask Hahn: which SSP/ensemble the local CMIP6 file holds (not in the repo), and for
-        the source `cmip6_data.npy` (models × months × lat × lon, indexed from 1850 in
-        `bin/data/forecast_precip.ipynb` → likely historical + scenario) with its model
-        list. Would give a historical baseline for the same 36 models, still 1.5°.
-        Rebuild note: `× 30·86400` assumes 30-day months (±3% error).
+      - Ask Hahn: see "Questions for Hahn" (1). Rebuild note: `× 30·86400` assumes
+        30-day months (Feb +7.1%, 31-day months −3.2%; model calendars differ — use real
+        month lengths per model calendar).

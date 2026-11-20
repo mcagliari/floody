@@ -8,12 +8,21 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
 - `src/floody/data.py`: loaders for FEMA (compiled), PRISM precipitation, CMIP6
   precipitation forecasts, First Street Foundation flood risk, ACS census, ZCTA
   shapefiles; `get_X()` builds the 7 covariates per zipcode for 2022/2030/2040/2052;
-  `CityZipcodes()` hard-codes zipcode lists per city.
+  `CityZipcodes()` hard-codes zipcode lists per city. `FEMA.prepare(split_by, val_fraction,
+  test_fraction, seed)` (2026-11-20, skeleton of the single data-prep function): Y/X with
+  log10 applied, split once on the full table (`causalflow.split.train_val_test`, groups
+  from `FEMA.groups`: `random` | `zipcode` | `event` = year·100 + month) then by arm →
+  `{'train'|'val'|'test': {'treated'|'control': (Y, X, row_index)}}`. Old
+  `prepare_train_test` kept until its notebook callers move.
 - `src/floody/floody.py`: `flood_loss()` / `flood_saving()` — load pre-trained Optuna
   flow ensembles and evaluate losses / CRS savings at one covariate vector.
 - `bin/data/*.ipynb`: raw → processed data notebooks (provenance of every `floody.*.hdf5`).
-- `bin/causalflow/`: `train_causalflow.py` (Optuna training), `hpc.py` (SLURM),
-  validation notebooks. `bin/run_floody.py`: per-city loss/saving runs.
+- `bin/causalflow/`: `train_causalflow.py` (Optuna training: `flow|support`, arm, study,
+  `-d`, `--split-by`, `--split-seed`, `--n-trials`, `--max-epochs` (tests only: sbi does
+  not restore the best weights when the cap stops training)); objective = loss on the
+  external validation set, sbi's internal loss logged as trial attr `internal_loss`;
+  setup stored as study attrs and a resumed study with a different setup is refused;
+  `hpc.py` (Della SLURM), validation notebooks. `bin/run_floody.py`: per-city loss/saving runs.
 - `doc/nb/`: per-city result notebooks (upstream author's; outputs depend on Della files).
 - Planned: a CRS-specific subdirectory (location decided in restructuring step), with its
   own CLAUDE.md / Plan.md. floody itself should stay policy-agnostic where reasonable.
@@ -74,7 +83,7 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   storm months (Sandy, Ivan, Katrina, Irene/Lee). Decision: flag + exclude by default.
   lat/lon in `fema.compiled` are per row (rounded to 0.1°, differ between rows of one
   zipcode), from the claims; 25 rows NaN.
-  Other inputs (structure looked at 2026-11-19, contents not checked):
+  Other inputs (structure looked at 2026-11-19):
   `floody.acs_census.hdf5` = 32,713 zipcodes × (income, population, renter, educated,
   white) from `ACS2016_20new.csv` (ACS 5-year 2016–2020 export, built by
   `bin/data/census.ipynb`). Checked (notebook 03 §1): the training census covariates are
@@ -82,10 +91,21 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   CSV labelling them `2018.*`. `get_X` uses the same values for every forecast year
   (census held fixed to 2052 — modelling choice, not a bug).
   `floody.prism.precip.hdf5`: `ZIPCODE` + one point per zipcode (33,791, all FEMA zipcodes;
-  likely 2020-ZCTA centroids) — **labels swapped: `lat` holds longitudes, `long` latitudes**
-  (unused by code); plus yearly precipitation columns.
+  ≈ ZCTA points, median 0.004° from the internal points, 6,654 > 0.01°) — **labels swapped
+  in the file (from the raw PRISM CSV): `lat` holds longitudes, `long` latitudes**. Fixed on
+  load (2026-11-20): `Precip` renames them to `latitude`/`longitude` by value (|value| > 90 =
+  longitude; raises if undecidable), so a corrected file also works. Plus yearly
+  precipitation columns.
   `floody.cmip6.precip_forecast.hdf5` = 28,800 lat/lon grid points × `precip.<year>.<month>`
-  (every year 2022–2052) × 36 CMIP6 models, mm/month (×30·86400); the committed
+  (every year 2022–2052) × 36 CMIP6 models, mm/month (×30·86400); 1.5° common grid, so
+  regridded by whoever built `cmip6_data.npy` (CMIP6 output is on each model's own grid,
+  `grid_label` gn/gr). What a CMIP6 run is (refs [1–3] in workspace `docs/references.md`):
+  model (`source_id`) × experiment (`experiment_id`: `historical` 1850–2014, then one
+  ScenarioMIP scenario 2015–2100, e.g. `ssp245`) × member (`variant_label` r·i·p·f; future
+  runs normally keep the realization of their historical parent). `pr` = monthly-mean
+  precipitation flux, kg m⁻² s⁻¹. Unknown for our file: the scenario(s), the member per
+  model, the model list, the regridding — ask Hahn. Index from 1850 in
+  `forecast_precip.ipynb` fits historical + one scenario spliced (inference). The committed
   `forecast_precip.ipynb` writes only 2022/2030/2035/2040/2052 → local file made by a
   different version. City result files `floody.<city>.v0[_worst].hdf5`: per-zipcode
   forecast inputs (2022, 2052) + `flood_loss`/`crs_saving` (± sig), no zipcode column;
@@ -106,17 +126,28 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   max 484 > future max 341): 5-yr pooled maxima are noisy (future max below baseline max).
   `flood_risk100` = First Street 2022 `risk100` per zipcode (one static value per zipcode),
   whereas Cano uses `avg_risk_score_all` (= `flood_risk_avg_score`).
+  **FSF file (workspace notebook 05, 2026-11-20, pre-registered):** 31,977 zipcodes, no
+  NaN/duplicates, all 14,729 training zipcodes present (25 with `risk100.2022` = 0).
+  `risk{5,100,500}` = percent (0–100) of properties flooded in the 5/100/500-yr flood.
+  Labels are consistent: nesting 5 ≤ 100 ≤ 500 holds in every zipcode (H1 supported), and
+  the `.2052` columns are the larger ones in ~95% of changed zipcodes (H1b consistent;
+  median change +0.2–0.3 points). Actual FSF years possibly 2020/2050 (guess, unchecked).
+  `avg_risk.2022` (scale 1–10, but min 0 in the file) ≠ Cano's `avg_risk_score_all`: equal
+  within 1e-6 in only 10.4% of training zipcodes (H2 verdict "different release"); median
+  difference +0.02 (IQR −0.01…+0.08) but extremes −10…+8.4. Cause not established.
 - Processed files (`floody.fema.compiled.hdf5`, `floody.prism.precip.hdf5`,
   `floody.cmip6.precip_forecast.hdf5`, `floody.fsf.floodrisk_forecast.hdf5`,
   `floody.acs_census.hdf5`, `tl_2022_us_zcta520/`) and trained flows are **not in the
-  repo**. `_load_data` hard-codes `/Users/chahah/data/noah/` and
-  `/scratch/gpfs/chhahn/noah/floody/`; these must become configurable.
+  repo**. Data directory = environment variable **`FLOODY_DATA`** (`data.data_dir()`,
+  2026-11-20; error if unset); locally the workspace `data/floody/`. Flow/support paths
+  in `floody.py` are still hard-coded to Della (Plan: take model paths as arguments).
 - Outcome Y: `paid_claim_per_policy`, trained in **log10**.
 - Covariates X (order matters, 7 dims): `mean_monthly_rainfall`, `flood_risk100`,
   `median_household_income` (**log10**), `population` (**log10**), `renter_fraction`,
-  `educated_fraction`, `white_fraction`. The log10 transform is applied by the caller
-  (copy-pasted in several places), not by `prepare_train_test`.
+  `educated_fraction`, `white_fraction`. log10 applied inside `FEMA.prepare`; the old
+  `prepare_train_test` leaves it to the caller (copy-pasted in several places).
 - Treatment: `CRS_TREAT` boolean.
-- `outcome_range` for log10 claims: `[[-1.], [6.]]` in scripts, `[[0.], [6.]]` in
+- `outcome_range` for log10 claims: `[[-1.], [6.]]` in scripts (`OUTCOME_RANGE` in
+  `train_causalflow.py`, recorded in the study), `[[0.], [6.]]` in
   `bin/causalflow/causalflow.ipynb` — not yet reconciled.
 - Monetary results use `transf=lambda x: 10**x` (mean of 10**Y, not 10**mean).
