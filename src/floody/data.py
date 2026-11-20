@@ -41,8 +41,64 @@ class FEMA(ZipData):
     def __init__(self): 
         '''
         '''
-        # read data set 
+        # read data set
         self._data = _load_data('floody.fema.compiled.hdf5')
+
+    # covariates X in the order the flows expect; log10 applied to income, population
+    COVARIATES = ['mean_monthly_rainfall', 'flood_risk100', 'median_household_income',
+                  'population', 'renter_fraction', 'educated_fraction', 'white_fraction']
+    LOG10 = ['median_household_income', 'population']
+
+    def groups(self, split_by):
+        ''' group label per row for the validation/test split.
+
+        args:
+            split_by: 'random' (rows, returns None), 'zipcode' (unseen places),
+                or 'event' (unseen (year, month of loss), i.e. unseen storms)
+        '''
+        if split_by == 'random': return None
+        if split_by == 'zipcode': return np.asarray(self._data['ZIPCODE']).astype(int)
+        if split_by == 'event':
+            return (np.asarray(self._data['YEAROFLOSS']).astype(int) * 100 +
+                    np.asarray(self._data['MONTHOFLOSS']).astype(int))
+        raise ValueError("split_by must be 'random', 'zipcode' or 'event'")
+
+    def prepare(self, split_by='random', val_fraction=0.1, test_fraction=0.1, seed=42):
+        ''' training data for CausalFlow, split once on the full table and then
+        by treatment arm, so held-out groups are unseen by both arms.
+
+        Y = log10 `paid_claim_per_policy`; X = COVARIATES with log10 on LOG10;
+        treatment = `CRS_TREAT`.
+
+        kwargs:
+            split_by: see `groups`.
+            val_fraction, test_fraction: fractions of all rows (see
+                `causalflow.split.train_val_test`).
+            seed: int, seed of the split.
+
+        returns:
+            dict {'train'|'val'|'test': {'treated'|'control': (Y, X, index)}}
+            with Y (N,), X (N, 7) and `index` the rows of the compiled table.
+        '''
+        from causalflow.split import train_val_test
+
+        Y = np.log10(np.asarray(self._data['paid_claim_per_policy'], dtype=float))
+        X = np.array([np.asarray(self._data[c], dtype=float) for c in self.COVARIATES]).T
+        for c in self.LOG10:
+            j = self.COVARIATES.index(c)
+            X[:, j] = np.log10(X[:, j])
+        treated = np.asarray(self._data['CRS_TREAT']).astype(bool)
+
+        parts = dict(zip(['train', 'val', 'test'],
+                         train_val_test(len(Y), val_fraction=val_fraction,
+                                        test_fraction=test_fraction,
+                                        groups=self.groups(split_by), seed=seed)))
+        out = {}
+        for name, idx in parts.items():
+            out[name] = {}
+            for arm, keep in (('treated', treated[idx]), ('control', ~treated[idx])):
+                out[name][arm] = (Y[idx][keep], X[idx][keep], idx[keep])
+        return out
 
     def prepare_train_test(self, sample, split=0.9, seed=42): 
         ''' prepare training and testing datasets (numpy arrays) for CausalFlow
@@ -147,7 +203,10 @@ class Precip(ZipData):
     def __init__(self): 
         ''' Precipitation data from PRISM
         '''
-        self._data = _load_data('floody.prism.precip.hdf5', dtype='table') 
+        self._data = _load_data('floody.prism.precip.hdf5', dtype='table')
+        # the file stores longitudes under `lat` and latitudes under `long`
+        # (inherited from the raw PRISM zipcode CSV); name them from the values
+        _name_latlon(self._data, 'lat', 'long')
 
 
 class Census(ZipData): 
@@ -157,23 +216,43 @@ class Census(ZipData):
         self._data = _load_data('floody.acs_census.hdf5', dtype='table') 
 
 
-def _load_data(filename, dtype='table'): 
-    ''' load data 
+def _name_latlon(table, col_a, col_b):
+    ''' rename two coordinate columns to `latitude` and `longitude`, whichever
+    of the two holds which. Latitudes lie within [-90, 90]; US longitudes go
+    beyond (west of -90 deg), so the column with |value| > 90 is the longitude.
+    Raises ValueError if this does not single out one column (e.g. a table
+    with only eastern-US points).
     '''
-    if os.path.isdir('/Users/chahah/data/noah/'):  
-        # local machine 
-        if dtype == 'table': 
-            return Table.read(os.path.join('/Users/chahah/data/noah/', filename))
-        elif dtype == 'gpd': 
-            return gpd.read_file(os.path.join('/Users/chahah/data/noah/', filename))
-    elif os.path.isdir('/scratch/gpfs/chhahn/noah/'): 
-        # della 
-        if dtype == 'table': 
-            return Table.read(os.path.join('/scratch/gpfs/chhahn/noah/floody/', filename))
-        elif dtype == 'gpd': 
-            return gpd.read_file(os.path.join('/scratch/gpfs/chhahn/noah/floody/', filename))
-    else: 
-        raise ValueError
+    big_a = np.nanmax(np.abs(table[col_a])) > 90.
+    big_b = np.nanmax(np.abs(table[col_b])) > 90.
+    if big_a == big_b:
+        raise ValueError('cannot tell latitude from longitude in columns %s, %s' % (col_a, col_b))
+    lon, lat = (col_a, col_b) if big_a else (col_b, col_a)
+    table.rename_columns([lat, lon], ['latitude', 'longitude'])
+
+
+def data_dir():
+    ''' directory with the floody data files, from the environment variable
+    FLOODY_DATA
+    '''
+    path = os.environ.get('FLOODY_DATA')
+    if path is None:
+        raise EnvironmentError('set the environment variable FLOODY_DATA to the directory with the floody data files')
+    if not os.path.isdir(path):
+        raise NotADirectoryError('FLOODY_DATA=%s is not a directory' % path)
+    return path
+
+
+def _load_data(filename, dtype='table'):
+    ''' load a data file from data_dir()
+    '''
+    path = os.path.join(data_dir(), filename)
+    if dtype == 'table':
+        return Table.read(path)
+    elif dtype == 'gpd':
+        return gpd.read_file(path)
+    else:
+        raise ValueError('unknown dtype %s' % dtype)
 
 
 def read_zipshape(zipcodes): 
