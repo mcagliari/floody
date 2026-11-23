@@ -14,6 +14,14 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   from `FEMA.groups`: `random` | `zipcode` | `event` = year·100 + month) then by arm →
   `{'train'|'val'|'test': {'treated'|'control': (Y, X, row_index)}}`. Old
   `prepare_train_test` kept until its notebook callers move.
+- `src/floody/loca2.py` (2026-11-23): general reader for LOCA2 monthly files over HTTP byte ranges
+  (classic netCDF): `parse_header`, `RangeReader` (multi-range requests, refuses non-206 / oversized
+  responses, pause between requests, certificate verification always on), `box_indices`, `merge_bands`,
+  `extract_boxes` (full-width latitude bands → boxes, values as stored). Verified bit-for-bit against an
+  independent reader (workspace notebook 09). Server facts: files per run × period (historical 1950–2014;
+  SSPs 2015–2044 / 2045–2074 / 2075–2100), monthly variable `pr_tavg` (kg m-2 s-1, missing 1e30), grid
+  474 × 944 at 1/16°, lon 0–360, `.md5` only for daily files, certificate chain incomplete (CA bundle with
+  the SSL.com intermediate in `raw-loca2/`), 200 ranges per request accepted.
 - `src/floody/floody.py`: `flood_loss()` / `flood_saving()` — load pre-trained Optuna
   flow ensembles and evaluate losses / CRS savings at one covariate vector.
 - `bin/data/*.ipynb`: raw → processed data notebooks (provenance of every `floody.*.hdf5`).
@@ -96,11 +104,12 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   load (2026-11-20): `Precip` renames them to `latitude`/`longitude` by value (|value| > 90 =
   longitude; raises if undecidable), so a corrected file also works. Plus yearly
   precipitation columns.
-  **Decided 2026-11-20 (user with Hahn): forecast precipitation will come from
-  NEX-GDDP-CMIP6** (documented models/scenarios/members, historical runs); the current
-  CMIP6 file below is kept only as the record of Hahn's results. Hahn shared the GitHub
-  repo of the notebooks that built the processed files (to clone) and is looking for the
-  original FEMA data (if found: rebuild the processed dataset from the raw claims).
+  **Decided 2026-11-23: forecast precipitation will come from LOCA2** (CMIP6 downscaled
+  with LOCA, Pierce et al. 2023; supersedes NEX-GDDP-CMIP6, chosen 2026-11-20; reasons:
+  PresRat preserves each model's change ratio, up to 10 members per model — workspace refs
+  [5]–[7]); the current
+  CMIP6 file below is kept only as the record of Hahn's results. Hahn's preprocessing repo
+  (`noah`) and the raw NFIP snapshot are now in hand: see "Raw data and rebuild" below.
   `floody.cmip6.precip_forecast.hdf5` = 28,800 lat/lon grid points × `precip.<year>.<month>`
   (every year 2022–2052) × 36 CMIP6 models, mm/month (×30·86400); 1.5° common grid, so
   regridded by whoever built `cmip6_data.npy` (CMIP6 output is on each model's own grid,
@@ -140,6 +149,39 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   `avg_risk.2022` (scale 1–10, but min 0 in the file) ≠ Cano's `avg_risk_score_all`: equal
   within 1e-6 in only 10.4% of training zipcodes (H2 verdict "different release"); median
   difference +0.02 (IQR −0.01…+0.08) but extremes −10…+8.4. Cause not established.
+- **Raw data and rebuild (2026-11-23).** One folder per source in `$FLOODY_DATA`, each with `README.md`
+  (source, URL, date) and `SHA256SUMS`: `raw-fema/` (claims, FSF v1.2, Hahn's PRISM zipcode CSV, ZCTA–county
+  file, OpenFEMA field list), `raw-census/` (2020 ZCTA–block file), `raw-loca2/` (CA bundle; `pilot/` city
+  boxes), `raw-prism/` (planned).
+  - **Hahn's pipeline** = workspace `noah/` (`changhoonhahn/noah`, read-only): `bin/make_catalog.py::fema_catalog`
+    (raw claims → `fema.trimed.csv`: CRS missing → 11; `abs()` of building/contents payments — negative =
+    uncashed re-issued checks per FEMA; total paid = building + contents, ICC excluded; keep state present,
+    paid > 0, coverage > 0 → outcome = loss per *paid* claim; removes 22.7% of claims as unpaid) → `nb/0`
+    (drop missing/odd zipcodes; zipcode × year × month rows; `crs_treat` = mean over claims of class ≤ 9;
+    lat/lon = mean of claim coordinates; payouts and `policyCount` summed) → `nb/1` (FSF "Climate Risk
+    Statistics" v1.2 zip file → `avg_risk_score_all`, `pct_fs_risk_*`; rows without FSF dropped) → `nb/2`
+    (three ACS Social Explorer exports; rows need all three) → `nb/3` (PRISM zipcode × month `MEAN`, 1990–2020;
+    10.7% of rows dropped) → `nb/4` (years > 2003; **bug: every period takes the ACS 2016–20 ("2018.")
+    columns**). Output = our `zipcode.fema.fsf.acs.rainfall.csv` (v1; v2 adds `white_fraction`, not in the repo).
+  - **Snapshot** `raw-fema/fema.csv`: 2,478,927 claims, `asOfDate` ≈ 2020-08-23 (no claims after Aug 2020).
+    Reproduced exactly (workspace notebook 07): `fema_catalog` → 1,916,033 rows = `fema.trimed.csv` (all 42
+    columns), nb0 → 213,680 rows. CRS class missing for 36.7% of claims. Lat/lon rounded to 0.1°;
+    `censusTract` empty. **Training source** (user, 2026-11-23).
+  - **NFIP v3** `raw-fema/NfipClaimsV3.parquet` (OpenFEMA, refresh 2026-11-16, 2,731,064 claims; identical to
+    the live API on spot checks). Renamed fields (`reportedZipCode`, `crsClassCode`, `censusGeoid` = block
+    group, `primaryResidenceIndicator`), integer ids (no join to the snapshot ids). **CRS class lost**: missing
+    for 81–98% of 2004–2019 claims (notebook 10); for matched claims, v3 has the class for only 14% of those
+    that had one in the snapshot (notebook 11). Role: fix the snapshot's zipcodes (FEMA's corrections; block
+    groups) and, optionally, community numbers for CRS history — not a training source.
+  - Field meanings (OpenFEMA v3 field list, assumed unchanged since 2020): `countyCode` = primary county of
+    the project (not geocoded, may differ from the property's county); lat/lon rounded for privacy;
+    `reportedZipCode` as reported by the insurer; `crsClassCode` 1–10, missing not defined.
+  - Notebook results: 08 (claim-level zipcode/location classes, *mixed*), 10 (v3 vs snapshot rows,
+    *ambiguous*; missing rows = 0.12% of claims), 11 (snapshot↔v3 claim match, *ambiguous*: 89.10% unique 1:1,
+    payout agreement 99.84%; 4,632 matched claims with a changed zipcode).
+  - Historical CRS community lists (class, effective dates) exist as Flood Insurance Manual sections
+    (Internet Archive 2002–2005, 2017–2018, fema.gov 2020/2024/2026); OpenFEMA's Community Status Book is
+    current-only. First Street is not open access → keep v1.2.
 - Processed files (`floody.fema.compiled.hdf5`, `floody.prism.precip.hdf5`,
   `floody.cmip6.precip_forecast.hdf5`, `floody.fsf.floodrisk_forecast.hdf5`,
   `floody.acs_census.hdf5`, `tl_2022_us_zcta520/`) and trained flows are **not in the
