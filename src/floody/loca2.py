@@ -10,10 +10,14 @@ record is a single byte range. This module
 - turns lat/lon boxes into merged full-width bands and their byte ranges;
 - fetches many ranges per multi-range request, with guards against the server answering
   with the whole file (Apache does that when a request exceeds its range limit);
-- cuts the boxes out of the bands.
+- cuts the boxes out of the bands;
+- does the same on a downloaded local file (`LocalReader`, same interface), with a resumable
+  whole-file download (`download_file`) and the output writer (`save_boxes`).
 
 Nothing here is specific to a city or a model: callers pass boxes and a file URL.
 '''
+import hashlib
+import os
 import struct
 import time
 
@@ -130,7 +134,57 @@ def parse_header(buf):
                 recsize=recsize, header_size=cur.pos)
 
 
-class RangeReader(object):
+class _Reader(object):
+    ''' shared by the readers: subclasses define `fetch(ranges) -> {(start, end): bytes}` '''
+
+    def header(self, first=1 << 20):
+        ''' read and parse the header, growing the prefix until it parses (a reader with a
+        known `size` never reads past the end of the file) '''
+        size = getattr(self, 'size', None)
+        n = first
+        while True:
+            m = n if size is None else min(n, size)
+            buf = self.fetch([(0, m - 1)])[(0, m - 1)]
+            try:
+                return parse_header(buf)
+            except _NeedMore:
+                if m == size:
+                    raise ValueError('header runs past the end of the file')
+                n *= 2
+
+    def static_variable(self, hdr, name):
+        ''' a non-record variable (e.g. lat, lon) '''
+        v = hdr['vars'][name]
+        if v['is_record']:
+            raise ValueError('%s is a record variable' % name)
+        nbytes = int(np.prod(v['shape'])) * v['itemsize']
+        raw = self.fetch([(v['begin'], v['begin'] + nbytes - 1)])[(v['begin'], v['begin'] + nbytes - 1)]
+        return np.frombuffer(raw, dtype=v['dtype']).reshape(v['shape'])
+
+
+class LocalReader(_Reader):
+    ''' Same interface as `RangeReader`, on a local file. '''
+
+    def __init__(self, path):
+        self.path, self.size = path, os.path.getsize(path)
+        self.n_requests, self.n_bytes = 0, 0
+
+    def fetch(self, ranges):
+        ''' {(start, end): bytes} for inclusive ranges; raises if the file is too short '''
+        out = {}
+        with open(self.path, 'rb') as f:
+            for a, b in ranges:
+                f.seek(a)
+                data = f.read(b - a + 1)
+                if len(data) != b - a + 1:
+                    raise RuntimeError('range %d-%d beyond the end of %s' % (a, b, self.path))
+                out[(a, b)] = data
+                self.n_bytes += len(data)
+        self.n_requests += 1
+        return out
+
+
+class RangeReader(_Reader):
     ''' Multi-range HTTP reader for one file, with guards and a pause between requests.
 
     Parameters
@@ -217,25 +271,6 @@ class RangeReader(object):
             out.update(self._request(ranges[k:k + self.max_ranges]))
         return out
 
-    def header(self, first=1 << 20):
-        ''' download and parse the header, growing the prefix until it parses '''
-        n = first
-        while True:
-            buf = self.fetch([(0, n - 1)])[(0, n - 1)]
-            try:
-                return parse_header(buf)
-            except _NeedMore:
-                n *= 2
-
-    def static_variable(self, hdr, name):
-        ''' a non-record variable (e.g. lat, lon) '''
-        v = hdr['vars'][name]
-        if v['is_record']:
-            raise ValueError('%s is a record variable' % name)
-        nbytes = int(np.prod(v['shape'])) * v['itemsize']
-        raw = self.fetch([(v['begin'], v['begin'] + nbytes - 1)])[(v['begin'], v['begin'] + nbytes - 1)]
-        return np.frombuffer(raw, dtype=v['dtype']).reshape(v['shape'])
-
 
 def box_indices(lat, lon, box):
     ''' (row slice, column slice) of the grid cells whose centres lie in
@@ -311,3 +346,77 @@ def extract_boxes(reader, hdr, var, boxes, lat_name='lat', lon_name='lon', time_
         arr = np.stack([band_data[(rec, bd.start)][rs.start - bd.start:rs.stop - bd.start, cs] for rec in records])
         out[k] = dict(data=arr, lat=lat[rs], lon=lon[cs], rows=rs, cols=cs)
     return out
+
+
+def grid_variable(hdr, lat_name='lat', lon_name='lon'):
+    ''' name of the single record variable with dims (record, lat, lon); raises if not exactly one '''
+    names = [n for n, v in hdr['vars'].items() if v['is_record'] and v['dims'][1:] == [lat_name, lon_name]]
+    if len(names) != 1:
+        raise ValueError('expected one (record, %s, %s) variable, found %s' % (lat_name, lon_name, names))
+    return names[0]
+
+
+def md5_file(path, chunk=1 << 24):
+    m = hashlib.md5()
+    with open(path, 'rb') as f:
+        for b in iter(lambda: f.read(chunk), b''):
+            m.update(b)
+    return m.hexdigest()
+
+
+def download_file(url, path, verify=True, session=None, tries=5, wait=10, timeout=300, chunk=1 << 22):
+    ''' Download `url` to `path` over one connection, resuming after a dropped connection
+    (byte range from the bytes already on disk). Returns (size, md5). Raises if the final size
+    differs from the server's Content-Length or the server does not honour the resume.
+    '''
+    if verify is False:
+        raise ValueError('certificate verification must stay on')
+    s = session or requests.Session()
+    head = s.head(url, verify=verify, timeout=60, allow_redirects=True)
+    head.raise_for_status()
+    total = int(head.headers['Content-Length'])
+    for _ in range(tries):
+        have = os.path.getsize(path) if os.path.exists(path) else 0
+        if have > total:
+            os.remove(path)
+            have = 0
+        if have == total:
+            break
+        hdr = {'Range': 'bytes=%d-' % have} if have else {}
+        try:
+            with s.get(url, headers=hdr, stream=True, verify=verify, timeout=timeout) as r:
+                if r.status_code != (206 if have else 200):
+                    raise RuntimeError('server answered %d (expected %d)' % (r.status_code, 206 if have else 200))
+                with open(path, 'ab' if have else 'wb') as f:
+                    for b in r.iter_content(chunk):
+                        f.write(b)
+        except requests.exceptions.RequestException:
+            time.sleep(wait)
+    size = os.path.getsize(path) if os.path.exists(path) else 0
+    if size != total:
+        raise RuntimeError('%s: %d of %d bytes after %d tries' % (url, size, total, tries))
+    return size, md5_file(path)
+
+
+def save_boxes(path, out, boxes, hdr, var, source_url, method):
+    ''' Write the output of `extract_boxes` to netCDF4 (h5netcdf), one variable per box
+    (`<var>_<box>`, dims time, lat_<box>, lon_<box>), values as stored in the source file.
+    Same layout as the pilot (workspace notebook 09). Needs xarray + h5netcdf.
+    '''
+    import datetime
+    import xarray as xr
+    tv = hdr['vars'].get('time', {'attrs': {}})
+    miss = np.asarray(hdr['vars'][var]['attrs'].get('missing_value', [np.nan]))
+    ds = xr.Dataset(attrs=dict(source_url=source_url, LOCA2_version=str(hdr['attrs'].get('LOCA2_version', '')),
+                               variable=var, units=str(hdr['vars'][var]['attrs'].get('units', '')),
+                               extracted=datetime.datetime.now().isoformat(timespec='seconds'), method=method))
+    ds['time'] = ('time', out['_time'].astype('f8'), {'units': str(tv['attrs'].get('units', '')),
+                                                    'calendar': str(tv['attrs'].get('calendar', ''))})
+    for k in boxes:
+        e = out[k]
+        ds['%s_%s' % (var, k)] = (('time', 'lat_%s' % k, 'lon_%s' % k), e['data'].astype(np.float32),
+                                  {'box': list(boxes[k]), 'missing_value': float(miss.ravel()[0])})
+        ds['lat_%s' % k] = ('lat_%s' % k, e['lat'].astype('f8'))
+        ds['lon_%s' % k] = ('lon_%s' % k, e['lon'].astype('f8'))
+    ds.to_netcdf(path, engine='h5netcdf')
+    return path
