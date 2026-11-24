@@ -54,7 +54,8 @@ get community numbers for CRS history).
 2. [ ] **Snapshot↔v3 match, second stage** (notebook 11 ambiguous: 89.10% unique 1:1, payout agreement
        99.84%): which key fields changed for the 6.8% without a v3 key; separate the 4.0% snapshot
        duplicates by zipcode/payout. Criterion agreed before any second-stage match.
-3. [ ] **Zipcode fix at claim level** (replaces the 3 r + 8 km row mask): FEMA's changed zipcodes (4,632
+3. [ ] **Zipcode fix at claim level** (scale, notebook 17: ~1 wrong zipcode per 1,000 claims in both files; v3 only
+       slightly cleaner, ratio 0.79) (replaces the 3 r + 8 km row mask): FEMA's changed zipcodes (4,632
        matched claims) + block-group check (`censusGeoid` → ZCTA, `raw-census/` block file) for matched
        claims; notebook-08 county classes for unmatched ones; keep / drop / reassign per class. Criterion first.
 4. [ ] **Rebuild the rows**: notebook-0 aggregation on the cleaned claims + covariate joins (FSF v1.2,
@@ -65,15 +66,17 @@ get community numbers for CRS history).
        ZCTAs for all years; check against Hahn's 1990–2020 `MEAN` first (criterion first).
 6. [ ] **ACS vintage** (user's call): one fixed vintage (2016–20, all columns in hand, = what Hahn used) vs
        per period / newer (Census API by ZCTA).
-7. [ ] **Single data-prep function** in floody (workspace Plan §4): Hahn's exact behaviour as a "reproduce"
-       mode, fixes as options. Hahn's cleaning is now duplicated in notebooks 10 and 11 → move it there
-       (ask the user first).
-8. [ ] **CRS history** (needed: the snapshot class is not dated, workspace notebook 15). Done: Flood Insurance
-       Manual CRS lists 2003-10 … 2012-05 (18 editions, Internet Archive) → `raw-crs/fim_crs_lists.csv` (notebook 16).
-       Next: (a) locate editions 2012-10 … 2020 (FEMA moved files after 2012; 2017–2018 on the Internet Archive and
-       fema.gov 2020/2024/2026 were seen on 2026-11-23, URLs not recorded); (b) per community, class history = class
-       from each edition + effective dates (between editions), + Status Book for the latest change; (c) claim-level
-       dated class for the snapshot claims (community number from the notebook-11 match; unmatched 11% → open).
+7. [ ] **Walk-through with the user** (user, 2026-11-24): once the v3/CRS fix is done (or dropped), go through the
+       selection notebook step by step so every cut is understood; the cleaning in floody may change after that.
+   [ ] **Single data-prep function** in floody (workspace Plan §4): Hahn's exact behaviour as a "reproduce"
+       mode, fixes as options. Hahn's claim selection is now `floody.nfip` (2026-11-24; notebooks 08/10/11 call it).
+8. [ ] **CRS history** (needed: the snapshot class is not dated, workspace notebook 15). Done (notebook 16): all CRS
+       lists found, 2003-10 … 2026-04, 37 list dates → `raw-crs/crs_lists_all.csv` (gaps: 2015-05…2016-05,
+       2017…2018-04, 2019-04, 2021-04, 2024-10; 2025-10 partial). Next: (a) per community, class at any date = class of
+       the last list on or before it, refined by effective dates (between lists) and the Status Book (latest change);
+       how to treat gaps and communities that leave CRS (criterion first); (b) dated class for each snapshot claim
+       (community number from the notebook-11 match; unmatched 11% → open); (c) the gap editions may still be inside
+       whole manuals (2021-04 manual seen) — only if (a) shows a gap matters.
 Gated: extending past 2020 needs a dated CRS source. v3 claims and policies are not one (current class on every
 record, notebook 13) → the Flood Insurance Manual lists (item 8) are the only dated source found; the Status Book
 gives each community's current class from its effective date onward.

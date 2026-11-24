@@ -34,6 +34,13 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   writing to `$WORK` much faster than to `$SCRATCH` (user); `vm-small` ≤ 4 running / ≤ 16 submitted jobs per
   user; TACC's `sbatch` prints the login banner to stdout (filter the job id).
   Server: ssp245, ssp370, ssp585 only; ensemble composition differs by SSP (notebook 14 §7).
+- `src/floody/nfip.py` (2026-11-24, moved from workspace notebooks 10/11/08, counts reproduced): Hahn's selection on raw
+  NFIP claims of either version (`V3_TO_V1` renames) — `hahn_selection` (one flag per step: state, paid > 0, coverage
+  > 0, notebook-0 zipcode filter; `kept`), `selection_table` (claims left after each step), `zip_filter`. Subject to
+  change after the step-by-step review with the user (Plan, Next steps 7).
+- `src/floody/location.py` (2026-11-24, moved from workspace notebook 08, results reproduced exactly): consistency
+  of a claim's zipcode with its coordinates and county — `zcta_points` (2020 ZCTA points, threshold 3 r + 8 km),
+  `zcta_county` (ZCTA–county pairs), `far_claims`, `classify_far` (coordinates wrong / zipcode wrong / undecided).
 - `src/floody/floody.py`: `flood_loss()` / `flood_saving()` — load pre-trained Optuna
   flow ensembles and evaluate losses / CRS savings at one covariate vector.
 - `bin/data/*.ipynb`: raw → processed data notebooks (provenance of every `floody.*.hdf5`).
@@ -200,6 +207,9 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   - Field meanings (OpenFEMA v3 field list, assumed unchanged since 2020): `countyCode` = primary county of
     the project (not geocoded, may differ from the property's county); lat/lon rounded for privacy;
     `reportedZipCode` as reported by the insurer; `crsClassCode` 1–10, missing not defined.
+  - **v3 vs snapshot, zipcode quality, whole files** (workspace notebook 17, 2026-11-24, pre-registered): *partly
+    cleaner* — wrong zipcodes 0.83 vs 1.05 per 1,000 claims (2004–2019, ratio 0.79); rare in both. v3 zipcode overlaps the
+    claim's block group for 97.7% of claims with a 2020-vintage block group (23% of 2004–2019 block groups are not 2020).
   - Notebook results: 08 (claim-level zipcode/location classes, *mixed*), 10 (v3 vs snapshot rows,
     *ambiguous*; missing rows = 0.12% of claims), 11 (snapshot↔v3 claim match, *ambiguous*: 89.10% unique 1:1,
     payout agreement 99.84%; 4,632 matched claims with a changed zipcode).
