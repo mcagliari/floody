@@ -22,6 +22,18 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   SSPs 2015–2044 / 2045–2074 / 2075–2100), monthly variable `pr_tavg` (kg m-2 s-1, missing 1e30), grid
   474 × 944 at 1/16°, lon 0–360, `.md5` only for daily files, certificate chain incomplete (CA bundle with
   the SSL.com intermediate in `raw-loca2/`), 200 ranges per request accepted.
+  Also (2026-11-24): `LocalReader` (same interface on a downloaded file), `download_file` (one connection,
+  resumable, size check, md5), `save_boxes` (output layout of the pilot). Job script `bin/loca2/extract_cities.py`
+  (+ `extract_cities.slurm`) for the full extraction on TACC; unit tests `tests/test_loca2.py`.
+  Job script behaviour: walks a file list (`url`, `bytes`), skips files whose output exists, downloads one full file
+  at a time to `--work-dir`, cuts the boxes, deletes the full file, appends to `extract_log.csv`; stops starting new
+  files 15 min before `--time-limit`. Outputs are flat in `--out-dir`, named `<source file>.cities.nc` → historical
+  outputs are shared by all SSP lists. Local dry run bit-identical to the pilot (workspace notebook 14 §5).
+  The slurm template (LS6 `vm-small`, 2 h) has `-A` as placeholder, conda path to adapt, banner-safe chain commands.
+  LS6 facts (2026-11-24): download from the LOCA2 server 14.1 MB/s on a login node, 7.9 MB/s on a compute node;
+  writing to `$WORK` much faster than to `$SCRATCH` (user); `vm-small` ≤ 4 running / ≤ 16 submitted jobs per
+  user; TACC's `sbatch` prints the login banner to stdout (filter the job id).
+  Server: ssp245, ssp370, ssp585 only; ensemble composition differs by SSP (notebook 14 §7).
 - `src/floody/floody.py`: `flood_loss()` / `flood_saving()` — load pre-trained Optuna
   flow ensembles and evaluate losses / CRS savings at one covariate vector.
 - `bin/data/*.ipynb`: raw → processed data notebooks (provenance of every `floody.*.hdf5`).
@@ -152,7 +164,8 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
 - **Raw data and rebuild (2026-11-23).** One folder per source in `$FLOODY_DATA`, each with `README.md`
   (source, URL, date) and `SHA256SUMS`: `raw-fema/` (claims, FSF v1.2, Hahn's PRISM zipcode CSV, ZCTA–county
   file, OpenFEMA field list), `raw-census/` (2020 ZCTA–block file), `raw-loca2/` (CA bundle; `pilot/` city
-  boxes), `raw-prism/` (planned).
+  boxes; `city_boxes.json`; file lists `filelist_ssp{370,245,585}.csv`, notebook 14; full-run outputs planned in
+  `ssp370/`), `raw-prism/` (planned).
   - **Hahn's pipeline** = workspace `noah/` (`changhoonhahn/noah`, read-only): `bin/make_catalog.py::fema_catalog`
     (raw claims → `fema.trimed.csv`: CRS missing → 11; `abs()` of building/contents payments — negative =
     uncashed re-issued checks per FEMA; total paid = building + contents, ICC excluded; keep state present,
@@ -172,7 +185,18 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
     group, `primaryResidenceIndicator`), integer ids (no join to the snapshot ids). **CRS class lost**: missing
     for 81–98% of 2004–2019 claims (notebook 10); for matched claims, v3 has the class for only 14% of those
     that had one in the snapshot (notebook 11). Role: fix the snapshot's zipcodes (FEMA's corrections; block
-    groups) and, optionally, community numbers for CRS history — not a training source.
+    groups) and community numbers (`nfipRatedCommunityNumber`; zero-pad to 6 digits) — not a training source.
+  - **v3 `crsClassCode` is not dated** (workspace notebook 13, 2026-11-24, pre-registered): in NFIP policies v3
+    (`raw-fema/NfipPoliciesV3.parquet`, 74.8 M records, effective 2009–2026) and v3 claims it is the community's
+    *current* class (= OpenFEMA Community Status Book, 99.9%) written onto every record, also before the date that
+    class took effect (100% of 136,957 policy months). Neither file is a CRS history. Snapshot class = v3 class for
+    only 53% of matched 2009–2019 claims; snapshot claims without a class sit in communities without a class today
+    in 94% of cases (descriptive).
+  - **Snapshot class is not the class at the date of loss** (workspace notebook 15 §2, 2026-11-24, pre-registered:
+    of 94,859 matched claims with loss before their community's CRS entry date (Status Book), only 13.4% lack a
+    class; caveat: re-entry dates). Descriptive: it equals the current Status Book class for 99.3% of claims after the
+    current class took effect. Inference: a class from around 2020 written onto all claims. → Hahn's/Cano's
+    treatment (`crs_treat`, `communityRatingSystemDiscount`) is not dated; a dated treatment needs the CRS lists.
   - Field meanings (OpenFEMA v3 field list, assumed unchanged since 2020): `countyCode` = primary county of
     the project (not geocoded, may differ from the property's county); lat/lon rounded for privacy;
     `reportedZipCode` as reported by the insurer; `crsClassCode` 1–10, missing not defined.
@@ -181,7 +205,8 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
     payout agreement 99.84%; 4,632 matched claims with a changed zipcode).
   - Historical CRS community lists (class, effective dates) exist as Flood Insurance Manual sections
     (Internet Archive 2002–2005, 2017–2018, fema.gov 2020/2024/2026); OpenFEMA's Community Status Book is
-    current-only. First Street is not open access → keep v1.2.
+    current-only (class + date it took effect; `raw-fema/NfipCommunityStatusBook.csv`). First Street is not open
+    access → keep v1.2.
 - Processed files (`floody.fema.compiled.hdf5`, `floody.prism.precip.hdf5`,
   `floody.cmip6.precip_forecast.hdf5`, `floody.fsf.floodrisk_forecast.hdf5`,
   `floody.acs_census.hdf5`, `tl_2022_us_zcta520/`) and trained flows are **not in the

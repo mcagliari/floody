@@ -6,12 +6,51 @@ Workspace-level tasks: `../Plan.md`.
 Facts behind these steps: `CLAUDE.md` § Data ("Raw data and rebuild"). Training source = the Aug-2020
 snapshot (user, 2026-11-23); NFIP v3 is used only to fix the snapshot's zipcodes (and, optionally, to
 get community numbers for CRS history).
-1. [ ] **LOCA2 full extraction** (pilot passed, notebook 09). First: email Pierce (courtesy: ~4,800
-       throttled range requests; v20240915 vs v20220519 — what changed, documentation, does it still
-       preserve the model change ratio, which version to cite; fallback check only if unanswered,
-       criterion first). Add to `RangeReader`: retries with backoff, stop after a few consecutive errors.
-       Scope: SSP3-7.0, 92 runs × (historical 1950–2014 + 2015–2044 + 2045–2074), 7 city boxes (+0.25°)
-       → `raw-loca2/` with README + checksums of our outputs (~60 GB transferred, ~6.5 h). Other SSPs later.
+1. [ ] **LOCA2 full extraction — full files on TACC, cut there** (decided 2026-11-24, user: whole-file downloads
+       are normal use of the server; the many-range pattern was the only concern). Pilot passed (notebook 09).
+       Code, dry run, LS6 facts: `CLAUDE.md` § Code (`loca2`).
+       Scope: SSP3-7.0, 92 runs × (historical 1950–2014 + 2015–2044 + 2045–2074) = 276 files, 247.0 GB
+       (`raw-loca2/filelist_ssp370.csv`, notebook 14; its `chunk` column is not used), 7 city boxes (+0.25°) →
+       `raw-loca2/ssp370/` with README + checksums of our outputs (≈ 1.7 GB). Other SSPs: g.
+       b. [ ] User: talk to Hahn (download on TACC; then email Pierce questions 2–3 only, workspace
+              `docs/drafts/pierce_emails.md`: v20240915 vs v20220519, change ratio preserved, version to cite;
+              fallback check only if unanswered, criterion first). Email 1 (range requests) only if we go back to
+              byte ranges.
+       e. [ ] **Running**: 6 chained 2-h jobs on `vm-small` submitted 2026-11-24 (job 1 pending, reason Resources;
+              ≈ 8.7 h of downloads at 7.9 MB/s). Next:
+              - ~10 min after job 1 starts: `.out` in `$WORK/loca2_jobs/download-logs/` (one line per file),
+                `$WORK/loca2_cities/extract_log.csv` (`bytes == bytes_in_list`), `$WORK/loca2_full` (only the file in
+                progress), actual rate to `$WORK`. On failure: `scancel -u $USER -n loca2-cities`, read the `.out`.
+              - While the last `.out` says files are left: chain more jobs on the last job id (banner-safe commands in
+                the slurm header).
+              - ACCESS-CM2 r1i1p1f1 = file-list rows 108–110: copy its two outputs back early, run notebook 14 §6.0.
+              - At the end: `conda list -n loca2` into `$WORK/loca2_cities/` (if not done), `rsync` the folder →
+                `raw-loca2/ssp370/`, README line + SHA256SUMS.
+              LS6 setup (user, 2026-11-24): env `loca2` in `$HOME/miniconda3` (python 3.12, numpy, requests, xarray,
+              h5netcdf, scipy, pytest; `pip install --no-deps -e floody`); inputs in `$WORK/loca2_inputs/` (sha256
+              checked); filled job script `$WORK/loca2_jobs/extract_cities.sh` (repo copy stays a template);
+              `--work-dir $WORK/loca2_full`, `--out-dir $WORK/loca2_cities`.
+       f. [ ] Check (workspace notebook 14 §6) on the outputs copied to `raw-loca2/ssp370/`. Criterion fixed
+              2026-11-24 (user), before any output exists; PASS only if every item holds, else FAIL naming the files:
+              1. ACCESS-CM2 r1i1p1f1 historical 1950–2014 and ssp370 2015–2044 outputs vs `raw-loca2/pilot/`: all 7
+                 `pr_tavg_<city>` arrays, `lat_<city>`, `lon_<city>`, `time` (values + units/calendar) exactly equal;
+                 attributes `source_url`, `LOCA2_version`, `variable`, `units` equal (`extracted`, `method` differ
+                 by design).
+              2. One output per file-list row (276), no extra; months = 780 (1950–2014) / 360 (2015–2044, 2045–2074).
+              a. `extract_log.csv`: one row per file, `bytes == bytes_in_list` for every row.
+              b. `LOCA2_version` = `v20240915` in every output and every log row.
+              c. Per city, `lat_<city>` and `lon_<city>` exactly equal across all 276 outputs.
+       g. [ ] **ssp245 + ssp585, after ssp370** (gated on f PASS). File lists ready (notebook 14 §7, 2026-11-24):
+              `raw-loca2/filelist_ssp245.csv` (192 files, 64 runs, 171.8 GB), `filelist_ssp585.csv` (195, 65 runs,
+              174.5 GB); historical files shared with ssp370 included. New to download for both: 274 files, 188.6 GB
+              (≈ 6.6 h at 7.9 MB/s; ssp245 3.3 h, ssp585 3.5 h → ~3 chained 2-h jobs per scenario), incl. 16 historical files of runs
+              without ssp370. Copy both lists to `$WORK/loca2_inputs/`, swap `--filelist` in the slurm copy, same
+              `--out-dir` (existing outputs are skipped). Check: §6 with the file list as a parameter (criterion
+              items 2, a–c per list), agreed before the outputs exist.
+              Note for the forecast covariate: ensemble composition differs by SSP (e.g. CESM2-LENS 10 runs in ssp370,
+              none in ssp245/585; MPI-ESM1-2-HR 10 vs 2; TaiESM1 not in ssp585) → comparing SSPs mixes scenario and
+              ensemble differences unless restricted to common models/runs.
+       `floody.loca2.RangeReader` stays (verified) but is not used for this run.
 2. [ ] **Snapshot↔v3 match, second stage** (notebook 11 ambiguous: 89.10% unique 1:1, payout agreement
        99.84%): which key fields changed for the 6.8% without a v3 key; separate the 4.0% snapshot
        duplicates by zipcode/payout. Criterion agreed before any second-stage match.
@@ -29,9 +68,15 @@ get community numbers for CRS history).
 7. [ ] **Single data-prep function** in floody (workspace Plan §4): Hahn's exact behaviour as a "reproduce"
        mode, fixes as options. Hahn's cleaning is now duplicated in notebooks 10 and 11 → move it there
        (ask the user first).
-8. [ ] Optional — **CRS history**: locate the 2006–2016 editions of the CRS community list (Internet
-       Archive CDX works from the shell); only needed for community-level treatment or data after 2020.
-Gated: extending past 2020 needs a CRS source (v3 lost the class for 86% of matched claims).
+8. [ ] **CRS history** (needed: the snapshot class is not dated, workspace notebook 15). Done: Flood Insurance
+       Manual CRS lists 2003-10 … 2012-05 (18 editions, Internet Archive) → `raw-crs/fim_crs_lists.csv` (notebook 16).
+       Next: (a) locate editions 2012-10 … 2020 (FEMA moved files after 2012; 2017–2018 on the Internet Archive and
+       fema.gov 2020/2024/2026 were seen on 2026-11-23, URLs not recorded); (b) per community, class history = class
+       from each edition + effective dates (between editions), + Status Book for the latest change; (c) claim-level
+       dated class for the snapshot claims (community number from the notebook-11 match; unmatched 11% → open).
+Gated: extending past 2020 needs a dated CRS source. v3 claims and policies are not one (current class on every
+record, notebook 13) → the Flood Insurance Manual lists (item 8) are the only dated source found; the Status Book
+gives each community's current class from its effective date onward.
 
 ## Open questions for Hahn
 Check his repo first; ask only what it does not answer. (Former question 1, the CMIP6 file,
@@ -92,7 +137,9 @@ is moot: we switch to LOCA2 — decided 2026-11-23.)
       folder with notebooks), give it its own CLAUDE.md / Plan.md.
 - [ ] `flood_loss` / `flood_saving`: stop reloading flows on every call; take model
       paths as arguments.
-- [ ] **Treatment definition** (decision for the user): CRS class missing for 36.7% of raw claims (20–57% per
+- [ ] **Treatment definition** (decision for the user). **New 2026-11-24: the snapshot class is not dated**
+      (notebook 15 §2) → rebuild the treatment from a dated CRS history (Next steps 8) before choosing a rule.
+      Earlier facts: CRS class missing for 36.7% of raw claims (20–57% per
       year in 2004–2019, notebook 10) and set to 11 (= control) by Hahn; FEMA does not say what missing means;
       v3 cannot fill it. Check whether missing means "not in CRS" (e.g. against the historical CRS lists). Cano "score ≠ 11" vs floody
       `CRS_TREAT` (differ on 2,083 rows, score in [10, 11)). Rule now known (notebook 04
