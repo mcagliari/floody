@@ -216,6 +216,14 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
     On v3 **claims** (workspace notebook 19 §3, 2026-11-25): `crsClassCode` is filled for 33% of claims whose
     community kept its class from the loss to today and for 0.01% of those whose class changed — so it is missing
     wherever the class changed, and cannot show whether it is dated (test ambiguous). Use the dated history instead.
+  - **Dated CRS class** (workspace notebooks 16, 18, 19; 2026-11-25, rules and checks pre-registered): Flood
+    Insurance Manual CRS lists 2003-10 … 2026-04 (`raw-crs/crs_lists_all.csv`; gaps > 7 months flagged `gap`) +
+    Status Book → change points per community (`floody.crs`; final table `notebooks/out/18_crs_history.csv`,
+    `18_crs_entry.csv`). Decisions (user): earliest entry date over the lists (C3 sensitivity ambiguous, 0.39%);
+    rule-8 fixes Huntley 179480 → 10 from 2022-10, D'Iberville 280366 → 10 from 2009-10, Louisville City 210122
+    follows 210120 from 2008-05; key = `nfipRatedCommunityNumber`; drop the 86 claims whose number's state prefix
+    ≠ `state` (incl. no number). Class per v3 claim 2004–2026: `notebooks/out/19_v3_dated_class.parquet`.
+    Class 10 = not in CRS or no discount; "in CRS" = loss on/after the entry date. Rules for `gap`/`unknown`: Plan 8d.
   - **Snapshot class is not the class at the date of loss** (workspace notebook 15 §2, 2026-11-24, pre-registered:
     of 94,859 matched claims with loss before their community's CRS entry date (Status Book), only 13.4% lack a
     class; caveat: re-entry dates). Descriptive: it equals the current Status Book class for 99.3% of claims after the

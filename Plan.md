@@ -7,6 +7,9 @@ Facts behind these steps: `CLAUDE.md` § Data ("Raw data and rebuild"). **Traini
 (user, 2026-11-25; replaces the Aug-2020 snapshot, decided 2026-11-23): effort goes into making v3 usable (dated CRS
 class from the lists via its community numbers, zipcode checks); snapshot checks only where useful for comparison.
 Items 2–3 below were written for the snapshot and need re-scoping to v3.
+**Order from here (2026-11-25):** 8d (treatment rules) → 7 (walk-through of code and work so far) → 3 (zipcode fix,
+on v3) → 6 (ACS vintage) and 5 (PRISM) → 4 (aggregate to zipcode × month, join FSF / census / PRISM); 8c, 8e when
+useful; 2 for comparison only; 1 runs on TACC in parallel.
 1. [ ] **LOCA2 full extraction — full files on TACC, cut there** (decided 2026-11-24, user: whole-file downloads
        are normal use of the server; the many-range pattern was the only concern). Pilot passed (notebook 09).
        Code, dry run, LS6 facts: `CLAUDE.md` § Code (`loca2`).
@@ -71,76 +74,29 @@ Items 2–3 below were written for the snapshot and need re-scoping to v3.
        ZCTAs for all years; check against Hahn's 1990–2020 `MEAN` first (criterion first).
 6. [ ] **ACS vintage** (user's call): one fixed vintage (2016–20, all columns in hand, = what Hahn used) vs
        per period / newer (Census API by ZCTA).
-7. [ ] **Walk-through with the user** (user, 2026-11-24): once the v3/CRS fix is done (or dropped), go through the
-       selection notebook step by step so every cut is understood; the cleaning in floody may change after that.
+7. [ ] **Walk-through with the user** (user, 2026-11-24; widened 2026-11-25): go through the code and the work so far
+       step by step — the claim selection (`floody.nfip`, notebooks 07/10/11), the CRS lists and history (notebook 16,
+       `floody.crs`, notebooks 18–19), `floody.location` (notebooks 08/17) — so every cut and rule is understood before
+       the census/covariate joins (item 4); the cleaning in floody may change after that.
    [ ] **Single data-prep function** in floody (workspace Plan §4): Hahn's exact behaviour as a "reproduce"
        mode, fixes as options. Hahn's claim selection is now `floody.nfip` (2026-11-24; notebooks 08/10/11 call it).
-8. [ ] **CRS history** (needed: the snapshot class is not dated, workspace notebook 15). Done (notebook 16): all CRS
-       lists found, 2003-10 … 2026-04, 37 list dates → `raw-crs/crs_lists_all.csv` (gaps: 2015-05…2016-05,
-       2017…2018-04, 2019-04, 2021-04, 2024-10; 2025-10 partial). Next: (a) per-community class history (table:
-       community, from date, class, source, flag), workspace notebook 18, `floody.crs`. **Criterion agreed 2026-11-25
-       (user), before any numbers:**
-       Rules. 1. Each full-list row gives a change point (effective date, class); per community collect them over all
-       full lists, drop duplicates; class at t = class of the latest change point ≤ t. 2. Before the CRS entry date:
-       not in CRS, coded 10. 3. Between entry date and the earliest known effective date: in CRS, class unknown, flag
-       `unknown`. 4. Dates inside a gap between consecutive lists longer than 7 months: flag `gap` (the class from rule 1
-       still applies; only a change made and replaced inside the gap can be missed). 5. Communities in no list: never in
-       CRS, class 10. 6. Partial 2025-10 list: not used to build, only to check (C2). 7. Status Book: adds its (class,
-       effective date) as a last change point when that date is after the 2026-04 list. 8. The 5 communities that drop
-       off a list and the 6 rows with status R but class 8: listed by name and looked at one by one before deciding.
-       Checks (each: PASS ≥ 99.0%, FAIL < 97.0%, between = ambiguous). C1: share of (community, list) rows where the
-       history's class at the list's `as_of` equals the listed class. C2: (i) history at 2025-10-01 vs the partial
-       2025-10 list; (ii) history today vs Status Book class, communities in both; scored separately. C3: share of
-       communities whose entry date is the same in every list. All PASS → history usable for (b); any FAIL → stop and
-       look at the disagreements; ambiguous → report the disagreements by type, decide together, no re-cut.
-       Descriptive only: share of matched snapshot claims 2004–2019 with a known class / `unknown` / `gap`; how often
-       the dated class differs from the snapshot class.
-       Run 2026-11-25 (notebook 18): C1, C2(i), C2(ii) PASS; C3 FAIL (95.73%). **Follow-up agreed 2026-11-25 (user),
-       before running:** (i) C3 sensitivity: matched snapshot claims 2004–2019 recomputed with each community's latest
-       entry date instead of the earliest; ≤ 0.1% of claims change class → the C3 failure does not matter for (b);
-       > 1% → resolve the entry date by hand per community; between = ambiguous. (ii) Rule-8 fixes: Huntley 179480
-       class 10 from 2022-10-01; D'Iberville 280366 class 10 from 2009-10-01; Louisville City 210122 follows 210120
-       (Louisville-Jefferson County) from 2008-05-01; Lamar County 280304, Wachapreague 510005, Pennsville 340512
-       unchanged. Run: fixes change no matched 2004–2019 claim; sensitivity AMBIGUOUS (0.391%: re-entries ≈ 1,165
-       claims, "other" ≈ 2,250, mostly Bellaire). **Decided 2026-11-25 (user): keep the earliest entry date.** (a) done:
-       final table `notebooks/out/18_crs_history.csv` (rules 1–7 + fixes).
-       (b) dated class for each **v3** claim (workspace notebook 19), key `nfipRatedCommunityNumber` (forced:
-       `nfipCommunityNumberCurrent` mostly empty before 2017). **Criterion agreed 2026-11-25 (user), before running:**
-       hypothesis: the rated community number identifies a real NFIP community for almost every v3 claim, so the dated
-       class can be attached to v3 as is. Measure: v3 claims with loss 2004–2026, share whose rated number is in the
-       Status Book (all 25,137 NFIP communities). PASS ≥ 99.0% → attach as is; FAIL < 97.0% → look at the missing
-       numbers first; between = ambiguous. Descriptive only: where both numbers exist, share whose dated class differs
-       between them, by year; per year share of claims in CRS at the date of loss and `known`/`gap`/`unknown`; share
-       whose dated class differs from v3 `crsClassCode`. Not covered: whether the number is the right community for the
-       property (next: state prefix of the number vs claim `state`, criterion first). Snapshot (notebook-11 match):
-       comparison only. Run 2026-11-25: **PASS** (99.98% of 1,530,657 claims) → dated class attached,
-       `notebooks/out/19_v3_dated_class.parquet`.
-       **crsClassCode test, criterion agreed 2026-11-25 (user), before running** (notebook 19 §3): hypothesis: where v3
-       claims have `crsClassCode`, it is the class at the date of loss, not the class when the file was made. Data: v3
-       claims, loss 2004–2026, `crsClassCode` present, dated class known (not `unknown`) and ≠ class at file date (history
-       at the Status Book `lastRefresh`). Measure: share with `crsClassCode` = dated class. ≥ 90% = dated → DATED;
-       ≥ 90% = file-date class → CURRENT; otherwise AMBIGUOUS. Descriptive: same by year; group size. Cross-check, same
-       rule, on the snapshot (user): matched snapshot claims (notebook 11, community = v3 rated number), loss 2004–2019,
-       snapshot class present (not missing / 11), file date = snapshot as-of 2020-08-23; less indicative (matched
-       communities). Run 2026-11-25: v3 **AMBIGUOUS** (only 56 claims in the group: the field is filled for 33% of claims
-       whose class did not change since the loss and 0.01% of those whose class changed → it cannot separate the two
-       readings); snapshot **CURRENT** (98.71% carry the 2020 class).
-       **State check, criterion agreed 2026-11-25 (user), before running** (notebook 19 §4): hypothesis: each claim's
-       rated community number is in the claim's own state (first two digits = FIPS code of `state`), so the attached
-       dated class is from a community in the right state. Data: v3 claims, loss 2004–2026 (1,530,657), all. Measure:
-       share whose number's first two digits = FIPS of `state`. PASS ≥ 99.5% → list mismatches, drop them or correct
-       them when `state` and `countyCode` agree on another state and that state's community exists; FAIL < 98% → do not
-       use the attached class until the wrong field is known; between = AMBIGUOUS → breakdown by year and state, user
-       decides. Descriptive only: same by year; share with `countyCode` state digits = `state`; for mismatches, which of
-       the three sources is the odd one out; same check for `nfipCommunityNumberCurrent` where filled. Not covered: a
-       wrong community within the right state (county check: own criterion, later). Run 2026-11-25: **PASS** (99.994%;
-       86 mismatches: 43 no number, 23 state ''/'UN', 17 number from another state, 3 state disagrees with number and
-       county; 3 get a discount class) → open: drop the 86, or keep the 4 whose current number is in the state.
-       (c) the gap editions may still be inside
-       whole manuals (2021-04 manual seen) — only if (a) shows a gap matters.
-Gated: extending past 2020 needs a dated CRS source. v3 claims and policies are not one (current class on every
-record, notebook 13) → the Flood Insurance Manual lists (item 8) are the only dated source found; the Status Book
-gives each community's current class from its effective date onward.
+8. [ ] **CRS history and dated class per v3 claim.** Done 2026-11-25 (criteria, verbatim, and verdicts in workspace
+       notebooks 18 and 19; facts and decisions in `CLAUDE.md` § Data, "Dated CRS class"): lists 2003-10 … 2026-04
+       (notebook 16) → history `notebooks/out/18_crs_history.csv` (rules 1–7 + rule-8 fixes; earliest entry date kept);
+       class attached to every v3 claim 2004–2026 (`out/19_v3_dated_class.parquet`; number in Status Book PASS 99.98%,
+       state prefix PASS 99.994%, 86 mismatches dropped); v3 `crsClassCode` test ambiguous (field missing where the
+       class changed), snapshot class = 2020 class.
+       **Open:**
+       (d) [ ] **Treatment rules for the dated class** (next, criterion/decision with the user): `gap`-flagged claims
+              (40–87% of claims in 2015–2017, 2021, 2024; proposal: use the class, keep the flag for a sensitivity
+              run), `unknown` (0.12%), and the claims whose number is not in the Status Book (272, overlapping the 86)
+              — today they get class 10 by rule 5 (= untreated); proposal: drop them like the 86. Implement in the data-prep function.
+       (c) [ ] the gap editions may still be inside whole manuals (2021-04 manual seen) — more relevant now that `gap`
+              covers most claims in some years; would shrink the flag.
+       (e) [ ] optional: county check (claim's `countyCode` vs the community's county in the Status Book; communities
+              can span counties), criterion first.
+CRS dating past 2020 is now possible: the lists run to 2026-04 and the Status Book adds later changes; the claim window
+is then limited by the covariates (PRISM to 2025; ACS vintage, item 6).
 
 ## Open questions for Hahn
 Check his repo first; ask only what it does not answer. (Former question 1, the CMIP6 file,
@@ -201,8 +157,8 @@ is moot: we switch to LOCA2 — decided 2026-11-23.)
       folder with notebooks), give it its own CLAUDE.md / Plan.md.
 - [ ] `flood_loss` / `flood_saving`: stop reloading flows on every call; take model
       paths as arguments.
-- [ ] **Treatment definition** (decision for the user). **New 2026-11-24: the snapshot class is not dated**
-      (notebook 15 §2) → rebuild the treatment from a dated CRS history (Next steps 8) before choosing a rule.
+- [ ] **Treatment definition** (decision for the user). The snapshot class is not dated (notebook 15 §2); the dated
+      class per v3 claim now exists (notebooks 18–19, 2026-11-25; rules for `gap`/`unknown`: Next steps 8d).
       Earlier facts: CRS class missing for 36.7% of raw claims (20–57% per
       year in 2004–2019, notebook 10) and set to 11 (= control) by Hahn; FEMA does not say what missing means;
       v3 cannot fill it. Check whether missing means "not in CRS" (e.g. against the historical CRS lists). Cano "score ≠ 11" vs floody
