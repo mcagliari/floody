@@ -1,5 +1,7 @@
 #!/bin/bash
 # LOCA2 city extraction on TACC Lonestar6, vm-small (floody/Plan.md Next steps 1e).
+# Before the first chain: run the python command below once in `idev -p vm-small` with `--max-files 1` (the env
+# must import and write on the job's node type; `vm-small` VMs lack CPU flags that login/compute nodes have).
 # Identical restartable jobs; submit a chain so only one download runs at a time. From the job directory
 # (`-o` below is relative to it and Slurm does not create it: `mkdir -p download-logs` first):
 #   jid=$(sbatch --parsable extract_cities.slurm | grep -E '^[0-9]+' | tail -n1 | cut -d';' -f1); echo $jid

@@ -32,7 +32,11 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   The slurm template (LS6 `vm-small`, 2 h) has `-A` as placeholder, conda path to adapt, banner-safe chain commands.
   LS6 facts (2026-11-24): download from the LOCA2 server 14.1 MB/s on a login node, 7.9 MB/s on a compute node;
   writing to `$WORK` much faster than to `$SCRATCH` (user); `vm-small` ≤ 4 running / ≤ 16 submitted jobs per
-  user; TACC's `sbatch` prints the login banner to stdout (filter the job id).
+  user; TACC's `sbatch` prints the login banner to stdout (filter the job id); `vm-small` nodes (`v3xx-xxx`, VMs)
+  hide the `lahf_lm` CPU flag, so NumPy built for x86-64-v2 (2.5.5 from conda-forge) fails at import there
+  ("built with baseline optimizations (X86_V2)") → env `loca2` pins `numpy<2.4` (2.3.5 tested on `v320-025`,
+  2026-11-25); regular compute nodes (`c3xx-xxx`) have the flag. `save_boxes` (h5netcdf) needs `h5py` installed
+  explicitly (h5netcdf 1.8 does not pull it in; failed on LS6 2026-11-25).
   Server: ssp245, ssp370, ssp585 only; ensemble composition differs by SSP (notebook 14 §7).
 - `src/floody/nfip.py` (2026-11-24, moved from workspace notebooks 10/11/08, counts reproduced): Hahn's selection on raw
   NFIP claims of either version (`V3_TO_V1` renames) — `hahn_selection` (one flag per step: state, paid > 0, coverage
@@ -40,7 +44,12 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   change after the step-by-step review with the user (Plan, Next steps 7).
 - `src/floody/location.py` (2026-11-24, moved from workspace notebook 08, results reproduced exactly): consistency
   of a claim's zipcode with its coordinates and county — `zcta_points` (2020 ZCTA points, threshold 3 r + 8 km),
-  `zcta_county` (ZCTA–county pairs), `far_claims`, `classify_far` (coordinates wrong / zipcode wrong / undecided).
+  `zcta_county` (ZCTA–county pairs), `far_claims`, `classify_far` (coordinates wrong / zipcode wrong / undecided); `STATE_FIPS` (state abbreviation →
+  2-digit FIPS = first two digits of NFIP community numbers and county codes; 2026-11-25).
+- `src/floody/crs.py` (2026-11-25): CRS class history per community from the Flood Insurance Manual lists
+  (`raw-crs/crs_lists_all.csv`) + Status Book, rules of Plan item 8 — `read_lists`, `read_status_book`,
+  `full_list_dates`, `crs_history` (change points + entry date per community), `class_at` (class and flag
+  `''`/`unknown`/`gap` per community and date). Test `tests/test_crs.py`. Checks: workspace notebook 18.
 - `src/floody/floody.py`: `flood_loss()` / `flood_saving()` — load pre-trained Optuna
   flow ensembles and evaluate losses / CRS savings at one covariate vector.
 - `bin/data/*.ipynb`: raw → processed data notebooks (provenance of every `floody.*.hdf5`).
@@ -186,19 +195,27 @@ General project rules: `../CLAUDE.md`. Tasks: `Plan.md` (here) and `../Plan.md`.
   - **Snapshot** `raw-fema/fema.csv`: 2,478,927 claims, `asOfDate` ≈ 2020-08-23 (no claims after Aug 2020).
     Reproduced exactly (workspace notebook 07): `fema_catalog` → 1,916,033 rows = `fema.trimed.csv` (all 42
     columns), nb0 → 213,680 rows. CRS class missing for 36.7% of claims. Lat/lon rounded to 0.1°;
-    `censusTract` empty. **Training source** (user, 2026-11-23).
+    `censusTract` empty. Was the training source (user, 2026-11-23) until 2026-11-25; now kept for comparison only.
   - **NFIP v3** `raw-fema/NfipClaimsV3.parquet` (OpenFEMA, refresh 2026-11-16, 2,731,064 claims; identical to
     the live API on spot checks). Renamed fields (`reportedZipCode`, `crsClassCode`, `censusGeoid` = block
     group, `primaryResidenceIndicator`), integer ids (no join to the snapshot ids). **CRS class lost**: missing
     for 81–98% of 2004–2019 claims (notebook 10); for matched claims, v3 has the class for only 14% of those
     that had one in the snapshot (notebook 11). Role: fix the snapshot's zipcodes (FEMA's corrections; block
-    groups) and community numbers (`nfipRatedCommunityNumber`; zero-pad to 6 digits) — not a training source.
+    groups) and community numbers (`nfipRatedCommunityNumber`; zero-pad to 6 digits). **Training source from
+    2026-11-25 (user)**, with the CRS class taken from the dated history (`floody.crs`, workspace notebook 18), not
+    from `crsClassCode`. `nfipCommunityNumberCurrent` is mostly empty before 2017 (11% of 2004 claims, ≥ 98% from
+    2017); `nfipRatedCommunityNumber` is present for all but 48 claims (6 digits in v3), and its state prefix matches
+    the claim's `state` for 99.994% of 2004–2026 claims (notebook 19 §4, pre-registered PASS; `countyCode` matches
+    `state` 100%, probably not independent).
   - **v3 `crsClassCode` is not dated** (workspace notebook 13, 2026-11-24, pre-registered): in NFIP policies v3
     (`raw-fema/NfipPoliciesV3.parquet`, 74.8 M records, effective 2009–2026) and v3 claims it is the community's
     *current* class (= OpenFEMA Community Status Book, 99.9%) written onto every record, also before the date that
     class took effect (100% of 136,957 policy months). Neither file is a CRS history. Snapshot class = v3 class for
     only 53% of matched 2009–2019 claims; snapshot claims without a class sit in communities without a class today
     in 94% of cases (descriptive).
+    On v3 **claims** (workspace notebook 19 §3, 2026-11-25): `crsClassCode` is filled for 33% of claims whose
+    community kept its class from the loss to today and for 0.01% of those whose class changed — so it is missing
+    wherever the class changed, and cannot show whether it is dated (test ambiguous). Use the dated history instead.
   - **Snapshot class is not the class at the date of loss** (workspace notebook 15 §2, 2026-11-24, pre-registered:
     of 94,859 matched claims with loss before their community's CRS entry date (Status Book), only 13.4% lack a
     class; caveat: re-entry dates). Descriptive: it equals the current Status Book class for 99.3% of claims after the
